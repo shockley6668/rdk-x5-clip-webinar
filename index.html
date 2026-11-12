@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+
+<html data-static="true" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/><title>RDK Winter Webinar · CLIP Quantization</title><link href="style.css" rel="stylesheet"/><link href="assets/attention-walkthrough.css" rel="stylesheet"/><meta content="An interactive guide to CLIP, ONNX export, PTQ calibration, and inference on RDK X5, with measured experiments and step-by-step animations." name="description"/><meta content="Quantizing CLIP on RDK X5 | Interactive Webinar Guide" property="og:title"/><meta content="An interactive guide to CLIP, ONNX export, PTQ calibration, and inference on RDK X5, with measured experiments and step-by-step animations." property="og:description"/><meta content="website" property="og:type"/><meta content="https://shockley6668.github.io/rdk-x5-clip-webinar/" property="og:url"/><meta content="https://shockley6668.github.io/rdk-x5-clip-webinar/assets/winter-poster.png" property="og:image"/><meta content="RDK Winter Challenge" property="og:image:alt"/><meta content="summary_large_image" name="twitter:card"/><link href="https://shockley6668.github.io/rdk-x5-clip-webinar/" rel="canonical"/></head><body><div class="page-shell"><aside class="rail"><a class="brand" href="#overview"><span class="brand-mark">R</span><span><b>RDK CHALLENGE</b><small>2026 WINTER</small></span></a><p class="rail-label">WEBINAR GUIDE</p><nav><a href="#overview">00   Overview</a><a href="#architecture">01   CLIP architecture</a><a href="#deep-architecture">↳   Layers &amp; training</a><a href="#model">02   Get the model</a><a href="#onnx">03   Export &amp; inspect</a><a href="#ptq">04   PTQ &amp; calibration</a><a href="#quant-deep">↳   Quantization &amp; BPU</a><a href="#toolchain">05   X5 toolchain</a><a href="#results">06   Results</a><a href="#runtime">07   Runtime</a><a href="#tuning">08   Tuning</a><a href="#demo">09   Search example</a><a href="#resources">10   Resources</a></nav><div class="rail-status">INTERACTIVE WEBINAR GUIDE</div></aside><main>
+<header class="topbar"><div>2026 RDK WINTER CHALLENGE <b>/ WEBINAR</b></div><div class="top-meta"><span>40–50 minute walkthrough · RDK X5</span><button aria-pressed="false" class="motion-toggle" type="button">Pause animations</button></div></header>
+<section class="hero" id="overview"><div class="hero-copy"><p class="eyebrow">CLIP → ONNX → PTQ → RUNTIME</p><h1>Quantizing CLIP<br/>on RDK X5</h1><p class="lead">We will take a pretrained CLIP model, prepare and quantize its image encoder, and build a local photo search demo on RDK X5.</p><div class="hero-actions"><a class="button primary" href="#architecture">Start the guide ↓</a><a class="button ghost" href="#demo" target="_blank">Explore the search example ↗</a><a class="text-link" href="report.md">Experiment report ↗</a></div></div><div class="hero-visual"><div class="poster-wrap"><img alt="RDK Winter Challenge poster" src="assets/winter-poster.png"/></div><div class="floating-card"><small>OUR FINAL MODEL</small><strong>RN50 PTQ</strong><span>52.7% Recall@1 · 14.54 ms</span></div></div></section>
+<section class="section compact"><div class="section-title"><div><p class="eyebrow">AGENDA</p><h2>What we will cover</h2></div></div><ol class="agenda"><li><time>03 min</time><div><b>The photo search application</b><span>How images and text are compared</span></div></li><li><time>05 min</time><div><b>Inside CLIP</b><span>RN50, attention and the text Transformer</span></div></li><li><time>06 min</time><div><b>From checkpoint to ONNX</b><span>Export both encoders and inspect the graphs</span></div></li><li><time>09 min</time><div><b>Quantization on X5</b><span>Calibration data, configuration and compiler stages</span></div></li><li><time>07 min</time><div><b>Results and live demo</b><span>Runtime, retrieval quality and troubleshooting</span></div></li></ol></section>
+<section class="section" id="architecture"><div class="section-title"><div><p class="eyebrow">01 / MODEL</p><h2>How CLIP connects images and text</h2></div><p>CLIP learns a shared feature space using pairs of images and captions. At search time, the two encoders run separately.</p></div><div class="dual-stage"><article class="model-lane image-lane"><span class="lane-tag">IMAGE PATH</span><div class="lane-flow"><div class="asset-node"><b>Photo</b><small>224 × 224 RGB</small></div><i>→</i><div class="compute-node"><b>Modified RN50</b><small>Convolutions + attention pooling</small></div><i>→</i><div class="vector-node"><b>1024-d</b><small>Image vector</small></div></div></article><article class="model-lane text-lane"><span class="lane-tag">TEXT PATH</span><div class="lane-flow"><div class="asset-node"><b>Query</b><small>Up to 77 tokens</small></div><i>→</i><div class="compute-node"><b>Transformer</b><small>12 layers, 8 heads</small></div><i>→</i><div class="vector-node"><b>1024-d</b><small>Text vector</small></div></div></article></div><div class="similarity"><span>L2-normalize both vectors</span><code>score = image_vector · text_vector</code><span>Sort by similarity</span></div><div class="direct-answer"><b>Is there another Transformer after the encoders?</b><p>No. We normalize the two vectors, calculate their dot product, and rank the photos. The contrastive loss is used during training, not during retrieval.</p></div><div class="two-col"><div class="explain-panel blue-panel"><p class="eyebrow">IMAGE ENCODER</p><h3>Inside CLIP RN50</h3><p>The image encoder uses a three-convolution stem and four groups of residual blocks. A 7 × 7 feature map goes through attention pooling and a projection to produce a 1024-dimensional vector.</p><div class="network-stack"><span>Image</span><i>→</i><span>Stem</span><i>→</i><span>Residual blocks</span><i>→</i><span>Attention pool</span><i>→</i><span>1024-d</span></div></div><div class="explain-panel orange-panel"><p class="eyebrow">TEXT ENCODER</p><h3>Where the Transformer fits</h3><p>Tokens and positional embeddings pass through causal self-attention, residual connections, layer normalization and feed-forward layers. The end-of-text feature is projected to 1024 dimensions.</p><p>ViT uses a Transformer for image patches. Our selected RN50 uses convolutions for its image backbone.</p><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need ↗</a></div></div><article aria-labelledby="attention-title" class="attention-walkthrough" id="attention-lesson">
+<header class="aw-header">
+<div><p class="eyebrow">FOLLOW THE OUTPUT · REAL RN50 FORWARD PASS</p>
+<h3 id="attention-title">How does “a photo of a dog” become a search?</h3>
+<p>Follow the EOT (end-of-text) position through attention, then use the resulting sentence vector to rank photos.</p>
+</div>
+<div class="aw-header-actions"><span class="aw-badge">FP32 reference · CPU</span><button aria-pressed="false" id="aw-focus" type="button">Presentation view ⤢</button></div>
+</header>
+<div class="aw-settings">
+<label>Query <select id="aw-query"><option>Loading measured traces…</option></select></label>
+<label>Inspect head <select aria-label="Attention head" id="aw-head"></select></label>
+<span class="aw-settings-note">Layer 12 of 12 · all 8 heads used · selector changes the view only</span>
+</div>
+<nav aria-label="Attention explanation steps" class="aw-chapters">
+<button data-aw-step="0" type="button"><span>1</span>Find EOT</button>
+<button data-aw-step="1" type="button"><span>2</span>Compare Q &amp; K</button>
+<button data-aw-step="2" type="button"><span>3</span>Get weights</button>
+<button data-aw-step="3" type="button"><span>4</span>Mix V vectors</button>
+<button data-aw-step="4" type="button"><span>5</span>Use the output</button>
+<button data-aw-step="5" type="button"><span>6</span>Search photos</button>
+</nav>
+<div class="aw-step-heading"><span id="aw-step-number"></span><h4 id="aw-step-title"></h4></div>
+<p class="aw-step-explanation" id="aw-step-explanation"></p>
+<div aria-live="polite" class="aw-scene" id="aw-scene"></div>
+<div class="aw-controls">
+<button id="aw-previous" type="button">← Back</button>
+<button id="aw-play" type="button">▶ Play walkthrough</button>
+<button id="aw-next" type="button">Next →</button>
+<span id="aw-play-status">Advance one step at a time, or play.</span>
+</div>
+<div class="aw-takeaway"><b id="aw-takeaway-label">KEEP TRACK OF THE OUTPUT</b><p id="aw-takeaway"></p></div>
+<details class="aw-evidence"><summary>Where do these numbers come from?</summary>
+<p>Saved FP32 forwards of the local OpenAI RN50 checkpoint. We inspect the EOT query in the final text block. Each head’s scores use all 64 coordinates; vector previews show the first six. Other positions, prior layers, residual paths and the MLP remain part of the real computation.</p>
+<p>Photo rankings use the complete normalized 1,024-dimensional text feature and our saved paired FP32 RN50 image features for 512 COCO images. They are reference results, not a new X5 quantized benchmark. Changing the inspected head changes the view, not the model or ranking. Attention weights are routing coefficients, not a causal explanation of the whole prediction.</p>
+<p id="aw-reconstruction"></p>
+<a href="source/workshop/trace_text_attention.py" target="_blank">Trace-generation script ↗</a>
+<a href="assets/attention/trace.json" target="_blank">Saved values ↗</a>
+<a href="https://github.com/openai/CLIP/blob/main/clip/model.py" target="_blank">OpenAI model implementation ↗</a>
+</details>
+</article>
+<div class="speaker-note"><b>Say it live</b><span>“The image and text each get their own encoder. Once both are vectors, search is just similarity and ranking.”</span></div></section>
+<section class="section" id="deep-architecture"><div class="section-title"><div><p class="eyebrow">MODEL ANATOMY / TRAINING</p><h2>Inside the encoders</h2></div><p>Let’s follow the shapes, then see how training connects the two branches.</p></div>
+<div class="explain-panel blue-panel"><p class="eyebrow">CLIP RN50 · IMAGE ENCODER</p><h3>From pixels to a 1,024-dimensional vector</h3><div class="detail-flow"><div><b>224 × 224 × 3</b><small>RGB image</small></div><i>→</i><div><b>3 conv stem</b><small>Conv + BN + ReLU, average pool</small></div><i>→</i><div><b>Residual stages</b><small>3 / 4 / 6 / 3 bottleneck blocks</small></div><i>→</i><div><b>7 × 7 × 2048</b><small>Spatial feature map</small></div><i>→</i><div><b>Attention pool</b><small>49 locations + mean token → 1024</small></div></div><p>Each bottleneck follows a convolution path and a shortcut. Their outputs are added before the final activation. The shortcut gives the network a direct path for information and gradients.</p><div class="detail-flow"><div><b>Input x</b><small>branch into two paths</small></div><i>→</i><div><b>1×1 → 3×3 → 1×1</b><small>learned residual F(x)</small></div><i>⊕</i><div><b>Shortcut</b><small>x or projected x</small></div><i>→</i><div><b>ReLU(F(x) + shortcut)</b><small>block output</small></div></div></div>
+<div class="explain-panel orange-panel"><p class="eyebrow">CLIP ViT-B/32 · ALTERNATIVE IMAGE ENCODER</p><h3>A picture becomes a sequence of patches</h3><div class="detail-flow"><div><b>224 × 224 image</b><small>32 × 32 patch size</small></div><i>→</i><div><b>7 × 7 patches</b><small>49 image tokens</small></div><i>→</i><div><b>+ class token</b><small>50 tokens + positions</small></div><i>→</i><div><b>12 Transformer blocks</b><small>width 768 · 12 heads</small></div><i>→</i><div><b>class token → 512</b><small>projected image vector</small></div></div><p>These are the dimensions of the original OpenAI ViT-B/32 checkpoint, not the RN50 we ultimately deployed. Each patch projection and the class token enter the vision Transformer; the image encoder output is 512-dimensional.</p></div>
+<div class="explain-panel blue-panel"><p class="eyebrow">ONE TRANSFORMER BLOCK</p><h3>Layers are stacked; heads operate in parallel</h3><div class="detail-flow"><div><b>Input tokens X</b><small>77 × 512 for RN50 text</small></div><i>→</i><div><b>LayerNorm</b><small>normalize features per token</small></div><i>→</i><div><b>8 attention heads</b><small>each head uses Q, K, V</small></div><i>→</i><div><b>Concatenate + project</b><small>merge head outputs</small></div><i>→</i><div><b>Residual + MLP</b><small>second norm, FFN, residual</small></div></div><div class="head-grid"><div><b>Layer</b><p>A complete block. The text encoder repeats it 12 times sequentially; each layer receives the previous layer’s output.</p></div><div><b>Head</b><p>One parallel attention calculation within a layer. RN50 text uses width 512 ÷ 8 = 64 dimensions per head.</p></div><div><b>Q, K, V</b><p>Learned projections of the token representations. Softmax(QKᵀ / √64) weights V. A causal mask prevents text positions attending to future tokens.</p></div></div><p>CLIP uses pre-LayerNorm: <code>x₁ = x + Attention(LN(x))</code>; <code>x₂ = x₁ + MLP(LN(x₁))</code>. The original Transformer paper describes a different post-LN ordering.</p></div>
+<div class="lesson-animation" data-lesson="contrast-lesson" id="contrast-lesson"><div class="lesson-top"><div><p class="eyebrow">INTERACTIVE EXPLANATION</p><h3>How CLIP learns matching pairs</h3><p>A two-pair batch, from encoders to loss and gradients.</p></div><div class="lesson-controls"><button aria-label="Previous step" data-action="prev" type="button">←</button><button data-action="play" type="button">▶ Play</button><button aria-label="Next step" data-action="next" type="button">→</button></div></div><div class="lesson-track"><div class="lesson-node"><span>01</span><strong>Encode</strong></div><div class="lesson-node"><span>02</span><strong>Normalize</strong></div><div class="lesson-node"><span>03</span><strong>Similarity</strong></div><div class="lesson-node"><span>04</span><strong>Loss</strong></div><div class="lesson-node"><span>05</span><strong>Backprop</strong></div></div><div aria-live="polite" class="lesson-display"><div class="lesson-visual"></div><div class="lesson-copy"><small class="lesson-counter"></small><h4></h4><p></p></div></div><div aria-label="Animation progress" class="lesson-dots"></div></div><div class="explain-panel orange-panel"><p class="eyebrow">TRAINING · CONTRASTIVE LEARNING</p><h3>Where do the two paths meet?</h3><p>For a batch of N matched image–text pairs, normalize the projected vectors. Their dot products form an N × N similarity matrix, multiplied by a learned positive scale. Correct pairs lie on the diagonal.</p><div class="animation-caption">TRAINING FLOW · matched pairs are highlighted</div><div class="matrix-example"><div class="matrix-label">IMAGE ↓ / TEXT →</div><div class="matrix-head">dog caption</div><div class="matrix-head">bike caption</div><div class="matrix-head">dog image</div><div class="matrix-good">0.8 ✓</div><div>0.1</div><div class="matrix-head">bike image</div><div>0.2</div><div class="matrix-good">0.9 ✓</div></div><p>For each row, cross-entropy rewards the matching caption. For each column, it rewards the matching image. The CLIP loss averages the two directions:</p><div class="formula light-formula">L = ½ [ CE(S, diagonal labels) + CE(Sᵀ, diagonal labels) ]</div><p>Backpropagation sends gradients through the similarity scores and normalization into both projection heads and both encoders. The optimizer updates their trainable parameters and the logit scale. Image pixels and caption tokens are inputs, not updated parameters.</p><div class="detail-flow"><div><b>Loss</b><small>two cross-entropies</small></div><i>←</i><div><b>Similarity matrix</b><small>all pairs in batch</small></div><i>←</i><div><b>Image / text vectors</b><small>normalize + project</small></div><i>←</i><div><b>Both encoders</b><small>gradients update weights</small></div></div><p>At inference there is no cross-modal Transformer after the encoders: normalize vectors, compute similarity, and rank. This is late interaction through a shared embedding space.</p></div>
+<div class="official-sources"><a href="https://arxiv.org/abs/2103.00020">CLIP paper ↗</a><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need ↗</a><a href="https://github.com/openai/CLIP/blob/main/clip/model.py">OpenAI CLIP model code ↗</a></div></section><section class="section" id="model"><div class="section-title"><div><p class="eyebrow">02 / SOURCE</p><h2>Get and split the model</h2></div><p>OpenAI released the code and checkpoints. The original WIT training collection was not released.</p></div><div class="acquisition-runbook"><article><span>01</span><b>Get the code</b><code>git clone https://github.com/openai/CLIP.git</code></article><article><span>02</span><b>Load RN50</b><code>clip.load("RN50", device="cpu")</code></article><article><span>03</span><b>Check the hash</b><code>afeb0e10…c04b6762</code><small>Compare the complete SHA-256.</small></article><article><span>04</span><b>Keep the pair</b><code>model.visual + model.encode_text</code><small>Export both from the same checkpoint.</small></article></div><details class="code-details"><summary>Show checkpoint download and verification steps</summary><div class="code-details command-step"><p><b>Step 1 · Clone the official repository</b><br/><small>Windows PowerShell · project folder</small></p><pre><code>git clone https://github.com/openai/CLIP.git upstream-openai-clip</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note"></p></div><div class="code-details command-step"><p><b>Step 2 · Install dependencies</b><br/><small>Windows PowerShell · prepared Python environment</small></p><pre><code>python -m pip install -r upstream-openai-clip/requirements.txt
+python -m pip install onnx onnxruntime pillow numpy</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note"></p></div><div class="command-step"><p><b>Step 3 · Load and inspect the checkpoint</b><br/><small>Python code · save as inspect_checkpoint.py in the project folder</small></p><pre><code>import hashlib
+from pathlib import Path
+import sys
+sys.path.insert(0, "upstream-openai-clip")
+import clip
+
+model, preprocess = clip.load("RN50", device="cpu", jit=False,
+                             download_root="weights")
+checkpoint = Path("weights/RN50.pt")
+digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+print("checkpoint", checkpoint, checkpoint.stat().st_size)
+print("sha256", digest)
+print("visual", type(model.visual).__name__, model.visual.output_dim)
+print("text transformer", model.transformer.layers,
+      model.transformer.width,
+      model.transformer.resblocks[0].attn.num_heads)
+print("context length", model.context_length)</code></pre><button class="copy-command" type="button">Copy</button></div><div class="code-details command-step"><p><b>Step 4 · Run the saved Python script</b><br/><small>Windows PowerShell · project folder</small></p><pre><code>python inspect_checkpoint.py</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note">The script downloads weights/RN50.pt. The export script expects RN50.pt in the project root; copy the verified checkpoint there before export.</p></div><div class="code-details command-step"><p><b>Step 5 · Place the checkpoint for export</b><br/><small>Windows PowerShell · project folder</small></p><pre><code>Copy-Item weights\RN50.pt RN50.pt</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note">If RN50.pt already exists, verify its hash before replacing it.</p></div></details><div class="contract-table"><div><span>CHECKPOINT</span><b>RN50.pt</b><small>255,827,503 bytes</small></div><div><span>IMAGE</span><b>1×3×224×224 → 1×1024</b><small>float32, NCHW</small></div><div><span>TEXT</span><b>1×77 → 1×1024</b><small>int32 tokens → float32 features</small></div></div><div class="source-links"><a href="source/export_rn50_x5.py">Full export script ↗</a><a href="https://arxiv.org/pdf/2103.00020">CLIP paper PDF ↗</a></div></section>
+<section class="section" id="onnx"><div class="section-title"><div><p class="eyebrow">03 / EXPORT</p><h2>Export and inspect ONNX</h2></div><p>Fix the input shapes, export both branches, then verify the float outputs before quantization.</p></div><div class="steps four"><div><span>1</span><b>Image</b><small>Export model.visual with a fixed image tensor.</small></div><div><span>2</span><b>Text</b><small>Wrap model.encode_text and export the paired encoder.</small></div><div><span>3</span><b>Opset 11</b><small>Expand attention into supported basic operations.</small></div><div><span>4</span><b>Float check</b><small>Run ONNX checker and compare outputs with PyTorch.</small></div></div><details class="code-details"><summary>Show the minimal ONNX export</summary><pre><code>image = torch.zeros(1, 3, 224, 224, dtype=torch.float32)
+tokens = clip.tokenize(["a photo of a dog"])  # [1, 77], int32
+
+# Image branch: model.visual already ends at a 1024-d projected feature.
+torch.onnx.export(
+    model.visual, image, "clip_rn50_image.onnx",
+    input_names=["image"], output_names=["image_features"],
+    opset_version=11, dynamo=False,
+)
+
+class TextEncoder(torch.nn.Module):
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+    def forward(self, texts):
+        return self.owner.encode_text(texts)
+
+torch.onnx.export(
+    TextEncoder(model).eval(), tokens, "clip_rn50_text.onnx",
+    input_names=["texts"], output_names=["text_features"],
+    opset_version=11, dynamo=False,
+)</code></pre><p class="details-note">The full script also rewrites attention operations for opset 11 and compares exported outputs with PyTorch.</p></details><div class="code-details command-step"><p><b>Step 1 · Open the project folder</b><br/><small>Windows PowerShell</small></p><pre><code>Set-Location D:\webinar\clip-photo-search</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note"></p></div><div class="code-details command-step"><p><b>Step 2 · Export the paired encoders</b><br/><small>Windows PowerShell · project folder</small></p><pre><code>python -u export_rn50_x5.py</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note">This overwrites the existing ONNX files. The script checks the checkpoint and compares PyTorch with ONNX.</p></div><div class="two-col onnx-layout"><div class="netron-panel"><p class="eyebrow">NETRON</p><h3>What to inspect</h3><ol><li>Open float_models/clip_rn50_image.onnx in Netron.</li><li>Confirm image is float32 [1,3,224,224] and image_features is [1,1024].</li><li>Find Conv, MatMul and Softmax around attention pooling.</li><li>Open the text graph and check int32 [1,77] → [1,1024].</li><li>After compilation, compare the original, optimized and quantized graphs.</li></ol><a class="button ghost small" href="https://netron.app/">Open Netron ↗</a></div><div class="netron-visual"><div class="onnx-node input-node"><b>image</b><small>float32 [1,3,224,224]</small></div><span class="flow-line"></span><div class="onnx-node"><b>Conv / residual blocks</b></div><span class="flow-line"></span><div class="onnx-node hot"><b>Attention pooling</b><small>MatMul → Softmax → MatMul</small></div><span class="flow-line"></span><div class="onnx-node output-node"><b>image_features</b><small>float32 [1,1024]</small></div></div></div><p>Our image graph has 175 nodes, including 55 Conv, 5 MatMul and 1 Softmax. The text graph has 973 nodes and 12 Softmax operations.</p><div class="cell" data-cell="inspect-onnx">
+<div class="cell-head"><span>PYTHON · INSPECT ONNX</span><button class="run">Copy code</button></div>
+<textarea aria-label="PYTHON · INSPECT ONNX" readonly="" spellcheck="false">from collections import Counter
+import onnx
+
+for path in ["float_models/clip_rn50_image.onnx", "float_models/clip_rn50_text.onnx"]:
+    model = onnx.load(path)
+    print(path)
+    print("opset:", [x.version for x in model.opset_import])
+    print("inputs:", [(x.name, [d.dim_value for d in x.type.tensor_type.shape.dim]) for x in model.graph.input])
+    print("outputs:", [(x.name, [d.dim_value for d in x.type.tensor_type.shape.dim]) for x in model.graph.output])
+    print("ops:", dict(Counter(node.op_type for node in model.graph.node)))</textarea>
+<div class="output">Copy this snippet and run it in your local project environment.</div>
+</div></section>
+<section class="section" id="ptq"><div class="section-title"><div><p class="eyebrow">04 / PTQ</p><h2>What happens during calibration?</h2></div><p>Post-training quantization observes representative inputs and selects ranges and scaling parameters. It does not retrain the weights.</p></div><div class="animation-caption">CALIBRATION FLOW · sample → distribution → quantized values</div><div class="ptq-motion-board"><article><small>01 / SAMPLE</small><b>256 calibration images</b><div class="sample-fan"><i></i><i></i><i></i><i></i></div><span>Preprocessed float32 tensors</span></article><i class="ptq-arrow">→</i><article><small>02 / OBSERVE</small><b>Activation distributions</b><div class="mini-histogram"><i style="--h:24%"></i><i style="--h:45%"></i><i style="--h:78%"></i><i style="--h:100%"></i><i style="--h:76%"></i><i style="--h:39%"></i></div><span>Search for suitable thresholds</span></article><i class="ptq-arrow">→</i><article><small>03 / QUANTIZE</small><b>INT8 representation</b><div class="code-strip"><span>-128</span><span>…</span><span>0</span><span>…</span><span>127</span></div><span>Scale and zero point map between ranges</span></article></div><div class="quant-layout"><div class="formula-panel"><p class="eyebrow">AFFINE QUANTIZATION</p><div class="formula">q = clip(round(x / scale) + zero_point, qmin, qmax)</div><div class="formula">x̂ = (q − zero_point) × scale</div><p>A narrow range clips outliers; a wide range gives each quantization step less resolution.</p></div><div class="quant-lab"><div class="quant-head"><b>Try different bit widths</b><output id="bit-value">INT8</output></div><input aria-label="Bit width" id="bit-slider" max="8" min="4" step="1" type="range" value="8"/><div class="quant-vectors" id="quant-vectors"></div><div class="quant-stats"><span>Step <b id="quant-scale">—</b></span><span>MSE <b id="quant-error">—</b></span></div><p>This is a simplified illustration, not a simulation of the X5 compiler.</p></div></div><div class="data-rule"><div class="rule-number">256</div><div><h3>Representative, separate calibration data</h3><p>We selected 256 COCO 2017 images for calibration and 512 different images for evaluation. For a real NAS, use representative photos and keep a separate test set.</p></div><div class="rule-table"><span>Samples</span><b>256</b><span>Per file</span><b>602,112 bytes</b><span>Input</span><b>NCHW float32</b></div></div><div class="speaker-note"><b>Say it live</b><span>“The calibration data tells the tool what values to expect. If its preprocessing or distribution differs from deployment, the chosen ranges may be wrong.”</span></div></section>
+<section class="section" id="quant-deep"><div class="lesson-animation" data-lesson="quant-lesson" id="quant-lesson"><div class="lesson-top"><div><p class="eyebrow">INTERACTIVE EXPLANATION</p><h3>Quantization, frame by frame</h3><p>Follow one float value through integer conversion and reconstruction.</p></div><div class="lesson-controls"><button aria-label="Previous step" data-action="prev" type="button">←</button><button data-action="play" type="button">▶ Play</button><button aria-label="Next step" data-action="next" type="button">→</button></div></div><div class="lesson-track"><div class="lesson-node"><span>01</span><strong>Float</strong></div><div class="lesson-node"><span>02</span><strong>Scale</strong></div><div class="lesson-node"><span>03</span><strong>Round</strong></div><div class="lesson-node"><span>04</span><strong>Clamp</strong></div><div class="lesson-node"><span>05</span><strong>Dequantize</strong></div></div><div aria-live="polite" class="lesson-display"><div class="lesson-visual"></div><div class="lesson-copy"><small class="lesson-counter"></small><h4></h4><p></p></div></div><div aria-label="Animation progress" class="lesson-dots"></div></div><div class="section-title"><div><p class="eyebrow">QUANTIZATION / HOW IT WORKS</p><h2>Why does quantization lose information?</h2></div><p>Follow one number through quantization and dequantization before looking at a whole neural network.</p></div><div class="quant-layout"><div class="formula-panel"><p class="eyebrow">EXAMPLE · INT8</p><div class="formula">x = 0.37, scale = 0.1, zero_point = 0</div><div class="formula">q = round(0.37 / 0.1) = 4</div><div class="formula">x̂ = (4 − 0) × 0.1 = 0.40</div><p>The reconstructed value differs from the original by 0.03. Dequantization maps the integer back to the float scale; it cannot recover information lost to rounding or clipping.</p></div><div class="quant-lab"><h3>Two common errors</h3><p><b>Rounding:</b> a continuum of values must share a finite number of integer codes. Values between grid points are approximated.</p><p><b>Clipping:</b> values outside the selected range saturate at qmin or qmax. A larger range keeps more outliers but makes each step coarser at the same bit width.</p><p>For nearest rounding within range, the error of an individual scalar is typically bounded by half a step; saturation breaks that bound.</p></div></div><div class="head-grid"><div><b>Scale and zero point</b><p>Scale is the spacing between adjacent represented values. Zero point identifies the integer code for real zero. Symmetric quantization usually centers around zero; asymmetric quantization can better use codes for a shifted range.</p></div><div><b>Weights and activations</b><p>Weights are known after training. Activations depend on inputs, so PTQ observes representative examples to estimate ranges. Some schemes use one scale per tensor or separate scales per channel.</p></div><div><b>Accumulation and sensitivity</b><p>Quantized multiplies and accumulations propagate approximations through the network. LayerNorm, attention and outliers can amplify or redistribute perturbations; the size of the effect is model and input dependent.</p></div></div><div class="direct-answer"><b>Quantize, dequantize, and fake quantize</b><p>Quantization converts a floating-point value to a low-precision code. Dequantization reconstructs an approximation on the original scale. Fake quantization simulates this numerical effect while keeping a floating-point representation; it is useful for analysis or quantization-aware training. PTQ calibration does not backpropagate; QAT can use a gradient approximation through rounding.</p></div><div class="explain-panel blue-panel"><p class="eyebrow">QUANTIZATION UNDER THE HOOD</p><h3>From real values to integer multiply–accumulate</h3><p>For affine quantization, <code>q = clamp(round(x / s) + z, qmin, qmax)</code> and <code>x̂ = s(q − z)</code>. For activations and weights with per-tensor scales, a dot product can be approximated by:</p><div class="formula light-formula">y ≈ sₓ × s𝑤 × Σ (qₓ − zₓ)(q𝑤 − z𝑤)</div><p>The integer products are typically accumulated in a wider integer type; bias handling, rounding and requantization depend on the kernel and backend. Scales can be applied after accumulation only when their granularity permits it.</p><h3>Symmetric versus asymmetric</h3><p>Symmetric quantization centers the range around zero, often using zero point 0. Asymmetric quantization uses a nonzero zero point to cover shifted ranges more efficiently. For uint8 range [−1, 3], the scale is 4/255 ≈ 0.015686 and the zero point is round(1/scale) = 64. For x = 0.5, q = 96 and x̂ ≈ 0.502. These figures illustrate an affine scheme; the exact toolchain configuration must be checked in its report.</p><h3>Per-tensor, per-channel and per-group</h3><p>One scale per tensor is simple, but one extreme channel can make the step coarse for all others. Per-channel or per-group scales can fit different distributions more closely at the cost of metadata and hardware support. Per-group is common in some LLM weight-only formats; do not assume it is the scheme used by this X5 model.</p><h3>Calibration and diagnosis</h3><p>Max uses the observed extremes; percentile allows some clipping to preserve resolution; KL-based methods compare distributions. Compare strategies using the same held-out dataset. First check preprocessing and float ONNX, then compare optimized float, calibration/quantized output, compiled model and board. Use the actual optimized node names and check the toolchain report before trying mixed precision.</p><p>Our RN50 run used 256 calibration samples and <code>default</code>, whose log selected max-percentile 0.99995 with asymmetric quantization. It was not GPTQ, AWQ or SmoothQuant. Our ViT experiment showed early divergence near LayerNorm; the failed int16 override did not hit the optimized nodes, so it does not establish that int16 cannot help.</p><div class="official-sources"><a href="https://developer.d-robotics.cc/oe_x5_doc/en/oe_mapper/source/ptq/ptq_usage/ptq_usage.html">X5 PTQ workflow ↗</a><a href="https://developer.nvidia.com/blog/achieving-fp32-accuracy-for-int8-inference-using-quantization-aware-training-with-tensorrt/">Calibration methods ↗</a><a href="https://pytorch.org/blog/quantization-aware-training/">Fake quantization and QAT ↗</a></div></div><div class="explain-panel orange-panel"><p class="eyebrow">RDK X5 HARDWARE</p><h3>What is the BPU?</h3><p>The Brain Processing Unit is a dedicated neural-network accelerator on the RDK X5. It executes supported low-precision neural-network operations; the CPU handles general-purpose application work and operations assigned to it.</p><div class="detail-flow"><div><b>CPU</b><small>decode + preprocessing</small></div><i>→</i><div><b>Runtime</b><small>load compiled .bin</small></div><i>→</i><div><b>BPU subgraph 0</b><small>quantized operations</small></div><i>→</i><div><b>CPU Softmax</b><small>our RN50 attention pool</small></div><i>→</i><div><b>BPU subgraph 1</b><small>remaining operations</small></div><i>→</i><div><b>CPU</b><small>normalize + ranking</small></div></div><p>Our compile log also reports a final CPU Reshape. CPU/BPU boundaries may require data conversion and transfers, so the whole model’s latency cannot be inferred from BPU-only estimates. Operator placement depends on the toolchain and actual operator constraints.</p></div><div class="official-sources"><a href="https://developer.d-robotics.cc/rdk_x_doc/en/Advanced_development/toolchain_development/intermediate/ptq_process">RDK PTQ guide ↗</a><a href="https://developer.d-robotics.cc/rdk_x_doc/en/Advanced_development/toolchain_development/intermediate/supported_op_list">X5 operator constraints ↗</a><a href="https://pytorch.org/blog/quantization-aware-training/">PyTorch quantization and fake quantization ↗</a></div></section><section class="section" id="toolchain"><div class="section-title"><div><p class="eyebrow">05 / TOOLCHAIN</p><h2>Configure and run makertbin</h2></div><p>First read the four YAML sections, then see how makertbin uses them to create the X5 model.</p></div><div class="yaml-grid"><div class="yaml-card"><div class="file-label">x5_rn50_coco256.yaml</div><pre><code># Model location, X5 target, and generated artifact location.
+model_parameters:
+  # ONNX image encoder path inside the Docker container.
+  onnx_model: '/workspace/float_models/clip_rn50_image.onnx'
+  # bayes-e selects the RDK X5 architecture.
+  march: 'bayes-e'
+  # Output directory inside Docker. Change it if you want to preserve earlier results.
+  working_dir: '/workspace/build/clip_rn50_coco256_default'
+  # Prefix for the generated model and related output files.
+  output_model_file_prefix: 'clip_rn50_x5_coco256'
+  # Keep per-layer output dumping off for this build.
+  layer_out_dump: false
+
+# Input contract must match the exported ONNX and runtime preprocessing.
+input_parameters:
+  # Name of the ONNX model input; check it in Netron.
+  input_name: 'image'
+  # Input is a preprocessed feature tensor, not an image in NV12 format.
+  input_type_train: 'featuremap'
+  # ONNX input layout: batch, channels, height, width.
+  input_layout_train: 'NCHW'
+  # Runtime also supplies a preprocessed feature tensor.
+  input_type_rt: 'featuremap'
+  # Runtime tensor layout must match the application input.
+  input_layout_rt: 'NCHW'
+  # CLIP normalization is done outside the model; do not apply it twice.
+  norm_type: 'no_preprocess'
+
+# Representative input tensors used to estimate quantization ranges.
+calibration_parameters:
+  # Directory inside Docker containing raw preprocessed calibration tensors.
+  cal_data_dir: '/workspace/calibration_coco256'
+  # Each file contains raw float32 values, not a .npy header.
+  cal_data_type: 'float32'
+  # Let the toolchain choose its default calibration strategy; inspect the log.
+  calibration_type: 'default'
+
+# Compilation settings for the X5 target.
+compiler_parameters:
+  # Optimize for latency rather than throughput.
+  compile_mode: 'latency'
+  # Compiler optimization level; validate performance on the board.
+  optimize_level: 'O3'
+  # Number of parallel compilation jobs.
+  jobs: 4
+  # Generate additional compilation debug information.
+  debug: true</code></pre><a href="source/x5_rn50_coco256.yaml">Full YAML ↗</a></div><div class="pipeline"><div><span>01</span><b>model_parameters</b><small>Choose the image ONNX model and X5 target (bayes-e); set where the build outputs go.</small></div><div><span>02</span><b>input_parameters</b><small>Tell the tool the input name, type, layout and preprocessing contract. This example receives CLIP-normalized NCHW feature tensors.</small></div><div><span>03</span><b>calibration_parameters</b><small>Point to representative raw float32 tensors and select the calibration strategy.</small></div><div><span>04</span><b>compiler_parameters</b><small>Choose latency mode, O3 optimization, parallel jobs and debug output.</small></div></div></div><div class="direct-answer"><b>What the command does with this configuration</b><p><strong>1. Read and optimize:</strong> load the ONNX model and input contract, then optimize the graph for the selected target.</p><p><strong>2. Calibrate and quantize:</strong> run the calibration inputs to estimate activation ranges, select quantization parameters and produce a quantized graph. In our recorded run, the log reports max-percentile 0.99995 with asymmetric quantization; check your own log for the actual result.</p><p><strong>3. Partition and compile:</strong> assign supported operations to the BPU and others to the CPU, then compile and package the model using the chosen compiler settings.</p><p><strong>4. Inspect the output:</strong> review the compiler log and artifacts in <code>working_dir</code>. Validate accuracy and latency on the board; the YAML itself does not prove either.</p></div><div class="yaml-decisions"><article><small>MODEL + INPUT</small><b>What is being converted?</b><p>The RN50 image encoder consumes a normalized float32 tensor named image with layout NCHW. The text encoder is a separate model.</p></article><article><small>CALIBRATION</small><b>Which examples?</b><p>Our directory contains 256 representative tensors, each [1,3,224,224] in raw float32 format. The count comes from the files, not a YAML setting.</p></article><article><small>COMPILER</small><b>How is it built?</b><p>latency selects a compilation mode; O3 is the optimization level. Measure the compiled model to learn the actual latency.</p></article><article><small>OUTPUT</small><b>Where are files written?</b><p>Docker mounts the Windows project directory at /workspace. working_dir is relative to that mounted project, and the prefix names the output artifacts.</p></article></div><h3>Run the X5 toolchain</h3><p>Follow the steps in order: check the model, prepare the calibration tensors, then compile.</p><div class="code-details command-step"><p><b>Step 1 · Open the project folder</b><br/><small>Windows PowerShell</small></p><pre><code>Set-Location D:\webinar\clip-photo-search</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note"></p></div><div class="code-details command-step"><p><b>Step 2 · Check model compatibility in the X5 Docker image</b><br/><small>Windows PowerShell · Docker Desktop running</small></p><pre><code>docker run --rm --network none `
+  -v "${PWD}:/workspace" -w /workspace x5-oe:v1.2.8 `
+  hb_mapper checker --model-type onnx --march bayes-e `
+  --model /workspace/float_models/clip_rn50_image.onnx</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note">Checker reports compatibility and placement; it does not measure retrieval accuracy.</p></div><div class="cal-guide" id="calibration-guide">
+<header class="cal-guide-head"><p class="eyebrow">STEP 3 · PREPARE CALIBRATION DATA</p><h3>From COCO photos to calibration tensors</h3><p>Prepare the data on Windows first. The X5 toolchain will read it inside Docker.</p></header>
+<div aria-label="Calibration preparation flow" class="cal-journey"><span>COCO photo</span><b>→</b><span>CLIP preprocessing</span><b>→</b><span>float32 tensor</span><b>→</b><span>makertbin</span></div>
+<article class="cal-step"><div class="cal-num">01</div><div><h4>Select the images</h4><p>The script reads the <code>calibration</code> list in <code>D:\webinar\datasets\coco2017_subset\split.json</code> and opens the listed photos from the dataset's <code>calibration</code> folder. Our evaluation uses a separate split.</p><div class="cal-tag">256 COCO images · no captions needed</div></div></article>
+<article class="cal-step"><div class="cal-num">02</div><div><h4>Apply CLIP preprocessing</h4><p>Each photo is decoded and converted to RGB. The official CLIP transform resizes the shorter edge to 224 with bicubic interpolation, keeps the aspect ratio, then center-crops to 224 × 224.</p><p>It converts the image to CHW float values in [0, 1], applies <code>(x − mean) / std</code> per channel, and adds a batch dimension.</p><details class="cal-extra"><summary>Show CLIP normalization values</summary><p><code>mean = (0.48145466, 0.4578275, 0.40821073)</code><br/><code>std = (0.26862954, 0.26130258, 0.27577711)</code></p></details><div class="cal-tag">Output per image: [1, 3, 224, 224] · float32 · NCHW</div></div></article>
+<article class="cal-step"><div class="cal-num">03</div><div><h4>Save one tensor per image</h4><p><code>tofile()</code> saves raw float32 values to the folder below. Each file is 602,112 bytes; it is calibration input, not the compiled model.</p><div class="cal-path">D:\webinar\clip-photo-search\calibration_coco256</div><p>From PowerShell, run the preparation script:</p><div class="cal-command"><div><small>WINDOWS POWERSHELL</small><button class="copy-command" type="button">Copy</button></div><pre><code>Set-Location D:\webinar\clip-photo-search
+python -u ..\prepare_calibration_256.py</code></pre></div><p class="cal-note">Re-running overwrites matching names but does not remove unrelated old files.</p><details class="cal-extra"><summary>See the actual preparation script</summary><pre><code>"""Create 256 disjoint COCO2017 calibration tensors using CLIP preprocessing."""
+import json
+import sys
+from pathlib import Path
+import numpy as np
+from PIL import Image
+
+root=Path(__file__).resolve().parent
+project=root/'clip-photo-search'
+dataset=root/'datasets/coco2017_subset'
+sys.path.insert(0,str(project/'upstream-openai-clip'))
+from clip.clip import _transform
+out=project/'calibration_coco256'
+out.mkdir(exist_ok=True)
+transform=_transform(224)
+items=json.loads((dataset/'split.json').read_text(encoding='utf8'))['calibration']
+for i,item in enumerate(items,1):
+    image=Image.open(dataset/'calibration'/item['file_name']).convert('RGB')
+    tensor=transform(image).unsqueeze(0).numpy().astype(np.float32)
+    assert tensor.shape==(1,3,224,224) and np.isfinite(tensor).all()
+    dest=out/(Path(item['file_name']).stem+'.bin')
+    tensor.tofile(dest)
+    assert dest.stat().st_size==602112
+    if i%50==0: print('Prepared',i,'/',len(items),flush=True)
+print('Prepared',len(items),'CLIP-normalized calibration tensors:',out,flush=True)</code></pre></details></div></article>
+<article class="cal-step"><div class="cal-num">04</div><div><h4>Pass the tensors to makertbin</h4><p>The project folder is mounted as <code>/workspace</code> in Docker. The YAML tells the toolchain where the tensors are and that preprocessing is already done:</p><div class="cal-command"><div><small>x5_rn50_coco256.yaml · relevant settings</small><button class="copy-command" type="button">Copy</button></div><pre><code>input_parameters:
+  input_type_train: featuremap
+  input_layout_train: NCHW
+  norm_type: no_preprocess
+
+calibration_parameters:
+  cal_data_dir: /workspace/calibration_coco256
+  cal_data_type: float32
+  calibration_type: default</code></pre></div><p>The tool runs these inputs through the model to estimate activation ranges; it does not retrain the model. We run <code>makertbin</code> in the next section.</p></div></article>
+<div class="cal-warning"><b>Keep inference consistent</b><p>Calibration uses PIL/torchvision; the board uses OpenCV. Interpolation and rounding can differ, so compare the resulting tensors when debugging accuracy.</p></div></div><div class="code-details command-step"><p><b>Step 4 · Calibrate and compile</b><br/><small>Windows PowerShell · Docker Desktop running</small></p><pre><code>docker run --rm --network none --memory 12g `
+  -v "${PWD}:/workspace" -w /workspace x5-oe:v1.2.8 `
+  hb_mapper makertbin --config x5_rn50_coco256.yaml `
+  --model-type onnx</code></pre><button class="copy-command" type="button">Copy</button><p class="details-note">This uses the existing YAML. Its output directory already contains artifacts from our earlier run; a rerun can overwrite them or encounter existing-output conflicts. To preserve them for comparison, change working_dir and output_model_file_prefix first.</p></div><div class="artifact-map"><a href="source/hb_mapper_makertbin.log"><small>LOG</small><b>makertbin output ↗</b><span>Calibration and compilation stages</span></a><a href="source/build/clip_rn50_coco256_default/clip_rn50_x5_coco256_quant_info.json"><small>DIAGNOSTICS</small><b>quant_info.json ↗</b><span>Node-level information</span></a><a href="report.md"><small>EXPERIMENT</small><b>Full report ↗</b><span>Results and test conditions</span></a></div></section>
+<section class="section" id="results"><div class="section-title"><div><p class="eyebrow">06 / EVIDENCE</p><h2>Why we chose RN50</h2></div><p>Both models were evaluated on the same 512 COCO images, with one caption and one target image per query.</p></div><div class="comparison"><article class="model-card"><div class="model-head"><div><small>VISION TRANSFORMER</small><h3>ViT-B/32</h3></div><span>NOT SELECTED</span></div><div class="model-row"><span>FP32 Recall@1</span><b>52.7%</b></div><div class="model-row"><span>PTQ Recall@1, 32 / 256 calibration images</span><b>7.6% / 8.6%</b></div><p>Significant error appeared around the LayerNorm path and accumulated through the model. More calibration images alone did not fix it.</p></article><article class="model-card chosen-card"><div class="model-head"><div><small>CONVOLUTION + ATTENTION POOL</small><h3>RN50</h3></div><span>SELECTED</span></div><div class="model-row"><span>FP32 Recall@1</span><b>51.8%</b></div><div class="model-row"><span>X5 PTQ Recall@1</span><b>52.7%</b></div><p>Recall@5 / @10 changed from 85.4% / 93.4% to 83.2% / 92.4%. The small Recall@1 increase does not prove quantization improved the model.</p></article></div><div class="performance-strip"><article><small>IMAGE FORWARD</small><b>14.54 ms</b><span>Median; p95 14.78 ms</span></article><article><small>INDEXING</small><b>33.5 ms</b><span>Median per image including preprocessing</span></article><article><small>TEXT QUERY</small><b>≈0.34 s</b><span>Text encoder on X5 CPU</span></article><article><small>FEATURE COSINE</small><b>0.902</b><span>Mean across 512 images</span></article></div><div class="method-note"><b>Evaluation scope</b><p>This is a regression comparison, not a measurement of production NAS accuracy. Other images may also match a caption.</p></div></section>
+<section class="section" id="runtime">
+<div class="section-title"><div><p class="eyebrow">07 / RUNTIME · LIVE ON THE BOARD</p><h2>Connect, inspect, and run CLIP</h2></div><p>We will log into the X5, inspect the deployed files, and follow one real inference call from input tensor to search results.</p></div>
+<div class="rt-summary"><b>Two models, two runtimes</b><p><code>clip_rn50_x5_coco256.bin</code> runs through <code>hbm_runtime</code>, which executes the compiled CPU/BPU graph. <code>clip_rn50_text.onnx</code> runs through ONNX Runtime on the CPU. Our Python application handles preprocessing and ranking.</p></div>
+<nav aria-label="Runtime lesson steps" class="rt-nav"><a href="#rt-connect">1 Connect</a><a href="#rt-files">2 Inspect files</a><a href="#rt-load">3 Load model</a><a href="#rt-input">4 Prepare input</a><a href="#rt-run">5 Infer</a><a href="#rt-text">6 Encode text</a><a href="#rt-search">7 Search</a><a href="#rt-serve">8 Open demo</a></nav>
+<article class="rt-step" id="rt-connect"><header><span class="rt-number">01</span><div><h3>Connect to the board</h3><p>Windows PowerShell → RDK X5 Linux shell</p></div></header>
+<div class="cal-command"><div><small>WINDOWS POWERSHELL</small><button class="copy-command" type="button">Copy</button></div><pre><code>ssh root@RDK_X5_IP</code></pre></div>
+<p>Enter the board password when prompted. The commands below run on the X5 after login. This board must be reachable from the laptop; another setup may have a different IP.</p>
+<div class="cal-command"><div><small>X5 · LINUX SHELL</small><button class="copy-command" type="button">Copy</button></div><pre><code>cd /root/clip-photo-search
+pwd
+uname -m
+ls -lh</code></pre></div>
+<p class="rt-check">Check: the working directory is <code>/root/clip-photo-search</code>. This is separate from the Windows project at <code>D:\webinar\clip-photo-search</code>.</p>
+</article>
+<article class="rt-step" id="rt-files"><header><span class="rt-number">02</span><div><h3>Find the files we actually use</h3><p>A selected view of the existing board directory</p></div></header>
+<pre class="rt-tree"><code>/root/clip-photo-search/
+├── clip_rn50_x5_coco256.bin    Image encoder: compiled for X5
+├── clip_rn50_text.onnx        Paired text encoder: CPU
+├── rn50_board.py             Indexing and HTTP search service
+├── runtime_walkthrough.py    One-shot, readable inference example
+├── app.py                    Shared search-page HTML
+├── rn50-index.npz            Saved image vectors and photo paths
+├── coco128/images/train2017/ Photos used by the current demo
+└── sample/runtime/python/    CLIP tokenizer and vocabulary</code></pre>
+<p>The current demo index contains <b>128 × 1024</b> image features. The earlier accuracy evaluation used a separate set of 512 images. Old ViT experiments also remain in this directory; this lesson uses the two RN50 files above.</p>
+<div class="cal-command"><div><small>X5 · INSPECT THE APPLICATION</small><button class="copy-command" type="button">Copy</button></div><pre><code>sed -n '1,85p' rn50_board.py
+ls -lh sample/runtime/python</code></pre></div>
+<p>Find <code>Backend.__init__</code>, <code>preprocess</code>, <code>encode_image</code>, and <code>encode_text</code>. The <code>index</code> action computes photo embeddings; <code>serve</code> loads that index and handles queries.</p>
+<details class="code-details"><summary>Copy the walkthrough script from Windows, if needed</summary><p class="details-note">It is already installed on our demo board. Run this in a separate Windows terminal when setting up another copy of the same project.</p><div class="command-step"><pre><code>scp D:\webinar\clip-photo-search\runtime_walkthrough.py root@RDK_X5_IP:/root/clip-photo-search/</code></pre><button class="copy-command" type="button">Copy</button></div></details>
+</article>
+<article class="rt-step" id="rt-load"><header><span class="rt-number">03</span><div><h3>Load the model and read its interface</h3><p>Start Python on the X5; keep this session open through step 7.</p></div></header>
+<div class="cal-command"><div><small>X5 · LINUX SHELL</small><button class="copy-command" type="button">Copy</button></div><pre><code>python3</code></pre></div>
+<div class="cal-command"><div><small>X5 · PYTHON</small><button class="copy-command" type="button">Copy</button></div><pre><code>import hbm_runtime
+import numpy as np
+
+runtime = hbm_runtime.HB_HBMRuntime("clip_rn50_x5_coco256.bin")
+model_name = runtime.model_names[0]
+input_name = runtime.input_names[model_name][0]
+output_name = runtime.output_names[model_name][0]
+
+print(model_name)
+print(runtime.input_shapes[model_name])
+print(runtime.input_dtypes[model_name])
+print(runtime.output_shapes[model_name])
+print(runtime.output_dtypes[model_name])</code></pre></div>
+<p>Load once and reuse the runtime for multiple photos. The filename identifies the package; <code>model_name</code> identifies a model inside it. Read the input and output names from the runtime rather than guessing them.</p>
+<div class="rt-table-wrap"><table class="rt-table"><caption>Observed on our X5</caption><thead><tr><th>Item</th><th>Value</th><th>Meaning</th></tr></thead><tbody><tr><td>Model name</td><td><code>clip_rn50_x5_coco256</code></td><td>Outer dictionary key used by run()</td></tr><tr><td>Input</td><td><code>image · [1,3,224,224] · F32</code></td><td>Batch 1, RGB channels, 224 × 224</td></tr><tr><td>Output</td><td><code>image_features · [1,1024,1,1] · F32</code></td><td>The compiler added two size-one dimensions</td></tr></tbody></table></div>
+<p class="rt-check">Quantized internal operations do not mean we should cast the input to INT8. This compiled model exposes a float32 input and output; follow its reported interface.</p>
+<details class="code-details"><summary>Common hbm_runtime APIs and properties</summary><div class="rt-table-wrap"><table class="rt-table"><thead><tr><th>API / property</th><th>What we use it for</th></tr></thead><tbody><tr><td><code>HB_HBMRuntime(path)</code></td><td>Load a compiled model package on the board.</td></tr><tr><td><code>model_names</code></td><td>Find the internal model names.</td></tr><tr><td><code>input_names / output_names</code></td><td>Find tensor names for each model.</td></tr><tr><td><code>input_shapes / output_shapes</code></td><td>Check the dimensions required or returned by each tensor.</td></tr><tr><td><code>input_dtypes / output_dtypes</code></td><td>Check numeric types, such as F32 or U8.</td></tr><tr><td><code>input_quants / output_quants</code></td><td>Inspect quantization metadata when diagnosing a model interface. Do not apply an extra conversion to the F32 interface shown here.</td></tr><tr><td><code>run(inputs)</code></td><td>Execute inference and receive NumPy outputs grouped by model and tensor name.</td></tr></tbody></table></div><p class="details-note">The metadata above are properties: no parentheses. These examples target the hbm_runtime API installed on this X5.</p></details>
+</article>
+<article class="rt-step" id="rt-input"><header><span class="rt-number">04</span><div><h3>Turn a photo into the required tensor</h3><p>Decoding and CLIP normalization happen in the application.</p></div></header>
+<p>Our helper applies OpenCV BGR → RGB, short-edge resize to 224, center crop, HWC → CHW, division by 255, and CLIP channel normalization. It adds a batch dimension and returns contiguous float32 data.</p>
+<div class="cal-command"><div><small>X5 · SAME PYTHON SESSION</small><button class="copy-command" type="button">Copy</button></div><pre><code>from pathlib import Path
+from runtime_walkthrough import preprocess
+
+photo = Path("coco128/images/train2017/000000000009.jpg")
+x = preprocess(photo)
+print(x.shape, x.dtype, x.flags.c_contiguous)
+assert x.shape == (1, 3, 224, 224)
+assert x.dtype == np.float32 and np.isfinite(x).all()</code></pre></div>
+<p class="rt-check">Expected: <code>(1, 3, 224, 224) float32 True</code>. Use the same normalization contract as calibration. PIL/torchvision and OpenCV resizing can still differ in interpolation and rounding.</p>
+<details class="code-details"><summary>Read the full preprocessing function</summary><pre><code>def preprocess(path):
+    image = cv2.imread(str(path))
+    if image is None:
+        raise ValueError(f"Cannot decode {path}")
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    height, width = rgb.shape[:2]
+    if height &lt; width:
+        new_height, new_width = 224, round(width * 224 / height)
+    else:
+        new_width, new_height = 224, round(height * 224 / width)
+    rgb = cv2.resize(rgb, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
+    top, left = (new_height - 224) // 2, (new_width - 224) // 2
+    rgb = rgb[top:top + 224, left:left + 224]
+    x = rgb.astype(np.float32).transpose(2, 0, 1) / 255.0
+    mean = np.array([0.48145466, 0.4578275, 0.40821073], np.float32)[:, None, None]
+    std = np.array([0.26862954, 0.26130258, 0.27577711], np.float32)[:, None, None]
+    return np.ascontiguousarray(((x - mean) / std)[None], dtype=np.float32)</code></pre></details>
+</article>
+<article class="rt-step" id="rt-run"><header><span class="rt-number">05</span><div><h3>Call run(), then unpack the result</h3><p>The input dictionary names both the model and its tensor.</p></div></header>
+<div class="cal-command"><div><small>X5 · SAME PYTHON SESSION</small><button class="copy-command" type="button">Copy</button></div><pre><code>inputs = {model_name: {input_name: x}}
+outputs = runtime.run(inputs)
+raw = outputs[model_name][output_name]
+print(raw.shape, raw.dtype)
+
+from runtime_walkthrough import normalize
+image_vector = normalize(raw)
+print(image_vector.shape, np.linalg.norm(image_vector))</code></pre></div>
+<pre class="rt-tree"><code>Input:  {"clip_rn50_x5_coco256": {"image": x}}
+Output: {"clip_rn50_x5_coco256": {"image_features": array}}
+
+raw.shape       → (1, 1024, 1, 1)
+reshape(-1)     → (1024,)
+L2 normalize   → vector length 1</code></pre>
+<p>The helper checks for a finite, nonzero feature, flattens it, and divides by its L2 norm. The 1024 values are embedding coordinates, not class probabilities. The runtime executes the graph's compiled CPU/BPU partition; this call does not tokenize text or rank photos.</p>
+<details class="code-details"><summary>Three common ways to call run()</summary><div class="command-step"><pre><code># One loaded model with one input
+outputs = runtime.run(x)
+
+# One loaded model, tensors identified by input name
+outputs = runtime.run({input_name: x})
+
+# Explicit model name and input name (used by our application)
+outputs = runtime.run({model_name: {input_name: x}})
+
+# Same output lookup for all three forms
+raw = outputs[model_name][output_name]</code></pre><button class="copy-command" type="button">Copy</button></div><p class="details-note">These are alternatives, not three required steps. A name-to-tensor dictionary also supports models with multiple inputs; the outer dictionary selects models. Each tensor still needs the correct shape and dtype.</p></details>
+</article>
+<article class="rt-step" id="rt-text"><header><span class="rt-number">06</span><div><h3>Run the paired text encoder on the CPU</h3><p>The exported ONNX expects token IDs shaped [1,77], with dtype int32.</p></div></header>
+<div class="cal-command"><div><small>X5 · SAME PYTHON SESSION · LOAD AND INSPECT</small><button class="copy-command" type="button">Copy</button></div><pre><code>import onnxruntime as ort
+from runtime_walkthrough import SimpleTokenizer
+
+options = ort.SessionOptions()
+options.intra_op_num_threads = 4
+text_session = ort.InferenceSession(
+    "clip_rn50_text.onnx", sess_options=options,
+    providers=["CPUExecutionProvider"],
+)
+print([(i.name, i.shape, i.type) for i in text_session.get_inputs()])
+print([(o.name, o.shape, o.type) for o in text_session.get_outputs()])
+print(text_session.get_providers())</code></pre></div>
+<div class="cal-command"><div><small>X5 · SAME PYTHON SESSION · TOKENIZE AND INFER</small><button class="copy-command" type="button">Copy</button></div><pre><code>tokenizer = SimpleTokenizer()
+query = "a photo of a dog"
+start = tokenizer.encoder["&lt;|startoftext|&gt;"]
+end = tokenizer.encoder["&lt;|endoftext|&gt;"]
+ids = ([start] + tokenizer.encode(query))[:76] + [end]
+tokens = np.zeros((1, 77), dtype=np.int32)
+tokens[0, :len(ids)] = ids
+
+text_outputs = text_session.run(None, {"texts": tokens})
+text_vector = normalize(text_outputs[0])
+print(text_vector.shape)  # (1024,)</code></pre></div>
+<p><code>None</code> requests all outputs; ONNX Runtime returns them as a list. By comparison, <code>hbm_runtime.run()</code> returns a nested dictionary. Both vectors are normalized before retrieval.</p>
+<details class="code-details"><summary>Common ONNX Runtime APIs</summary><div class="rt-table-wrap"><table class="rt-table"><thead><tr><th>API</th><th>What it tells us or does</th></tr></thead><tbody><tr><td><code>InferenceSession(path, providers=…)</code></td><td>Load ONNX and select its execution provider.</td></tr><tr><td><code>get_inputs() / get_outputs()</code></td><td>Read names, shapes, and types before building a feed.</td></tr><tr><td><code>get_providers()</code></td><td>Check the session's configured execution providers.</td></tr><tr><td><code>run(None, {"texts": tokens})</code></td><td>Return all outputs as a list.</td></tr><tr><td><code>run(["text_features"], {"texts": tokens})</code></td><td>Request a particular named output; still returns a list.</td></tr></tbody></table></div></details>
+</article>
+<article class="rt-step" id="rt-search"><header><span class="rt-number">07</span><div><h3>Compare with the saved photo index</h3><p>Image encoding happens when indexing; each search encodes the text and scores existing image vectors.</p></div></header>
+<div class="cal-command"><div><small>X5 · SAME PYTHON SESSION</small><button class="copy-command" type="button">Copy</button></div><pre><code>index = np.load("rn50-index.npz", allow_pickle=False)
+vectors = index["vectors"]
+paths = index["paths"]
+print(vectors.shape)  # current demo: (128, 1024)
+scores = vectors @ text_vector
+top_k = np.argsort(-scores)[:5]
+print([(str(paths[i]), float(scores[i])) for i in top_k])
+index.close()</code></pre></div>
+<p>Because both sides have unit length, the dot product is cosine similarity. The scores rank photos; they are not confidence percentages. Use the same image encoder and preprocessing when creating or refreshing an index.</p>
+<p>To run the complete example as a script, leave Python with <code>exit()</code>, then run:</p>
+<div class="cal-command"><div><small>X5 · LINUX SHELL</small><button class="copy-command" type="button">Copy</button></div><pre><code>python3 -u runtime_walkthrough.py --query "a photo of a dog"</code></pre></div>
+<p class="rt-check">Verified on our X5: float32 image output, a 1024-dimensional unit vector, and five ranked photos from the 128-photo index. This one-shot script does not rebuild the index.</p>
+<div class="source-links"><a download="" href="assets/runtime_walkthrough.py">Complete runnable script ↗</a><a href="assets/runtime-walkthrough-output.txt">Recorded board output ↗</a></div>
+</article>
+<article class="rt-step" id="rt-serve"><header><span class="rt-number">08</span><div><h3>Start the search service</h3><p>Run from the X5 shell after leaving the interactive Python session.</p></div></header>
+<div class="cal-command"><div><small>X5 · LINUX SHELL</small><button class="copy-command" type="button">Copy</button></div><pre><code>python3 -u rn50_board.py serve \
+  --image-model clip_rn50_x5_coco256.bin \
+  --text-model clip_rn50_text.onnx \
+  --index rn50-index.npz \
+  --host 0.0.0.0 --port 8081</code></pre></div>
+<p>Leave this terminal running and open <a href="#runtime" rel="noopener" target="_blank">the photo search page</a> on the laptop. If the port is already in use, use the existing service. Ctrl+C stops a service started in this terminal.</p>
+<details class="code-details"><summary>Build the index when photos or the image model change</summary><p class="details-note">This runs image inference for every photo and overwrites rn50-index.npz. It is not required for each query.</p><div class="command-step"><pre><code>python3 -u rn50_board.py index \
+  --image-model clip_rn50_x5_coco256.bin \
+  --text-model clip_rn50_text.onnx \
+  --photos coco128/images/train2017 \
+  --index rn50-index.npz</code></pre><button class="copy-command" type="button">Copy</button></div></details>
+</article>
+<div class="official-sources"><a href="https://github.com/D-Robotics/rdk_x_doc/blob/main/docs/03_Basic_Application/06_multi_media_sp_dev_api/RDK_X5/pydev_multimedia_api_x5/pydev_hbdnn_demo.md">X5 hbm_runtime reference ↗</a><a href="https://onnxruntime.ai/docs/api/python/api_summary.html">ONNX Runtime Python API ↗</a><a href="source/rn50_board.py">Actual search-service source ↗</a></div>
+</section>
+<section class="section" id="tuning"><div class="section-title"><div><p class="eyebrow">08 / DEBUG</p><h2>When accuracy drops</h2></div><p>Change one variable at a time and evaluate on the same held-out set.</p></div><div class="decision-list"><div><span>01</span><div><b>Check the float baseline</b><p>Compare PyTorch and ONNX on identical inputs. Fix export or preprocessing first.</p></div><em>INPUT</em></div><div><span>02</span><div><b>Check calibration data</b><p>Verify distribution, channel order, resize, normalization, shape and raw file format.</p></div><em>DATA</em></div><div><span>03</span><div><b>Compare calibration methods</b><p>Test default, mix, KL or max with a controlled experiment.</p></div><em>PTQ</em></div><div><span>04</span><div><b>Find sensitive nodes</b><p>Use the optimized graph and quantization report, then investigate with hmct-debugger.</p></div><em>DEBUG</em></div><div><span>05</span><div><b>Try mixed precision or QAT</b><p>Test supported int16 settings on selected nodes; measure accuracy and latency again.</p></div><em>TRADEOFF</em></div></div><div class="warning"><b>Our ViT lesson</b><p>We initially specified two original LayerNorm node names for int16. Graph optimization had folded them into different nodes, so the setting had no measured effect. Always verify the actual optimized node names and resulting configuration.</p></div></section>
+<section class="section demo-section" id="demo">
+<div class="section-title"><div><p class="eyebrow">09 / SEARCH EXAMPLE</p><h2>Explore CLIP photo retrieval</h2></div><p>Choose a recorded query to inspect its closest photo matches.</p></div>
+<div class="rt-check"><b>Saved FP32 reference results</b><p>These examples use the paired floating-point RN50 encoders and a 512-image COCO index. They are the saved reference results used in the attention walkthrough, separate from the quantized X5 benchmark. Selecting a query displays its recorded ranking.</p></div>
+<label class="public-query-label" for="public-query">Choose a query</label><select aria-label="Recorded photo-search query" id="public-query"></select>
+<div aria-live="polite" class="public-photo-results" id="public-results"></div>
+<p id="public-query-note"></p>
+<div class="rt-check"><b>Run live search on your own RDK X5</b><p>The <a href="#runtime">Runtime lesson</a> shows how to load both encoders, build or load your index, and start the search service. Open your board's address on port 8081 from the same network. In the terminal examples, replace RDK_X5_IP with your board's IP address.</p><a href="assets/runtime-walkthrough-output.txt">Read the recorded X5 inference output ↗</a></div>
+</section><section class="section closing"><p class="eyebrow">FROM WEBINAR TO WINTER CHALLENGE</p><div class="section-title"><div><h2>Turn the demo into a project</h2></div><p>Add real data, measure the complete experience, and explain the limitations.</p></div><div class="stages"><div><span>IGNITE</span><b>Run the model</b><small>Check the X5 runtime, inputs and first output.</small></div><div><span>BUILD</span><b>Connect a photo library</b><small>Add NAS access and incremental indexing.</small></div><div><span>LAUNCH</span><b>Show your results</b><small>Report accuracy, latency, limitations and setup.</small></div></div></section><section aria-labelledby="resources-title" class="section resources-section" id="resources">
+<div class="section-title"><div><p class="eyebrow">10 / RESOURCES</p><h2 id="resources-title">Keep building with RDK</h2></div><p>References for your next project — and tools your AI agent can use.</p></div>
+<div class="resource-columns">
+<div class="resource-group">
+<h3>Development references</h3>
+<a class="resource-card" href="https://developer.d-robotics.cc/rdk_doc_center/en/" rel="noopener noreferrer" target="_blank"><h4>D-Robotics Documentation <span aria-hidden="true">↗</span></h4><p>English manuals, setup guides, and tutorials.</p><span class="resource-url">developer.d-robotics.cc/rdk_doc_center/en/</span></a>
+<a class="resource-card" href="https://github.com/D-Robotics/rdk_model_zoo" rel="noopener noreferrer" target="_blank"><h4>RDK Model Zoo <span aria-hidden="true">↗</span></h4><p>Model deployment examples and conversion tutorials.</p><span class="resource-url">github.com/D-Robotics/rdk_model_zoo</span></a>
+<a class="resource-card" href="https://developer.d-robotics.cc/en/rdkstudio" rel="noopener noreferrer" target="_blank"><h4>RDK Studio <span aria-hidden="true">↗</span></h4><p>An AI-native workbench for robotics development.</p><span class="resource-url">developer.d-robotics.cc/en/rdkstudio</span></a>
+</div>
+<div class="resource-group">
+<h3>Tools for your AI agent</h3>
+<a class="resource-card" href="https://github.com/D-Robotics/rdk-docs-mcp" rel="noopener noreferrer" target="_blank"><h4>RDK Docs MCP <span aria-hidden="true">↗</span></h4><p>Let your AI agent search the RDK documentation.</p><span class="resource-url">github.com/D-Robotics/rdk-docs-mcp</span></a>
+<a class="resource-card" href="https://github.com/D-Robotics/rdk-skills" rel="noopener noreferrer" target="_blank"><h4>RDK Skills <span aria-hidden="true">↗</span></h4><p>Reusable agent skills for RDK development and deployment.</p><span class="resource-url">github.com/D-Robotics/rdk-skills</span></a>
+<a class="resource-card" href="https://github.com/D-Robotics/dsh-plugin-rdk" rel="noopener noreferrer" target="_blank"><h4>DeepSeek Harness Plugin <span aria-hidden="true">↗</span></h4><p>RDK tools and skills for DeepSeek Harness.</p><span class="resource-url">github.com/D-Robotics/dsh-plugin-rdk</span></a>
+</div>
+</div>
+<div class="resource-community"><div><h3>D-Robotics Developer Community</h3><p>Join our Discord to share projects, ask questions, and connect with other developers.</p><a class="resource-invite" href="https://discord.com/invite/7wX9XkNKXv" rel="noopener noreferrer" target="_blank">discord.com/invite/7wX9XkNKXv ↗</a></div><a class="button primary" href="https://discord.com/invite/7wX9XkNKXv" rel="noopener noreferrer" target="_blank">Join our Discord ↗</a></div>
+</section>
+<footer class="site-footer"><span>RDK LAB · 2026 WINTER WEBINAR</span><span>See the experiment report for test conditions</span></footer></main></div><script src="app.js"></script><script src="assets/attention-walkthrough.js"></script></body></html>

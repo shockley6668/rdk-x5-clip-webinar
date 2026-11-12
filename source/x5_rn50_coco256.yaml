@@ -1,0 +1,47 @@
+# Model location, X5 target, and generated artifact location.
+model_parameters:
+  # ONNX image encoder path inside the Docker container.
+  onnx_model: '/workspace/float_models/clip_rn50_image.onnx'
+  # bayes-e selects the RDK X5 architecture.
+  march: 'bayes-e'
+  # Output directory inside Docker. Change it if you want to preserve earlier results.
+  working_dir: '/workspace/build/clip_rn50_coco256_default'
+  # Prefix for the generated model and related output files.
+  output_model_file_prefix: 'clip_rn50_x5_coco256'
+  # Keep per-layer output dumping off for this build.
+  layer_out_dump: false
+
+# Input contract must match the exported ONNX and runtime preprocessing.
+input_parameters:
+  # Name of the ONNX model input; check it in Netron.
+  input_name: 'image'
+  # Input is a preprocessed feature tensor, not an image in NV12 format.
+  input_type_train: 'featuremap'
+  # ONNX input layout: batch, channels, height, width.
+  input_layout_train: 'NCHW'
+  # Runtime also supplies a preprocessed feature tensor.
+  input_type_rt: 'featuremap'
+  # Runtime tensor layout must match the application input.
+  input_layout_rt: 'NCHW'
+  # CLIP normalization is done outside the model; do not apply it twice.
+  norm_type: 'no_preprocess'
+
+# Representative input tensors used to estimate quantization ranges.
+calibration_parameters:
+  # Directory inside Docker containing raw preprocessed calibration tensors.
+  cal_data_dir: '/workspace/calibration_coco256'
+  # Each file contains raw float32 values, not a .npy header.
+  cal_data_type: 'float32'
+  # Let the toolchain choose its default calibration strategy; inspect the log.
+  calibration_type: 'default'
+
+# Compilation settings for the X5 target.
+compiler_parameters:
+  # Optimize for latency rather than throughput.
+  compile_mode: 'latency'
+  # Compiler optimization level; validate performance on the board.
+  optimize_level: 'O3'
+  # Number of parallel compilation jobs.
+  jobs: 4
+  # Generate additional compilation debug information.
+  debug: true

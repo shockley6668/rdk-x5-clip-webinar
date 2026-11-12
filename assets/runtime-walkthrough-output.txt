@@ -1,0 +1,21 @@
+[BPU_PLAT]BPU Platform Version(1.3.6)! soc info(x5)
+[HBRT] set log level as 0. version = 3.15.55.0
+[DNN] Runtime version = 1.24.5_(3.15.55 HBRT)
+[A][DNN][packed_model.cpp:247][Model](2026-11-12,12:14:54.114.141) [HorizonRT] The model builder version = 1.24.3
+MODEL: clip_rn50_x5_coco256
+INPUT: image [1, 3, 224, 224] hbDNNDataType.F32
+OUTPUT: image_features [1, 1024, 1, 1] hbDNNDataType.F32
+PHOTO: /root/clip-photo-search/coco128/images/train2017/000000000009.jpg
+PREPROCESSED: (1, 3, 224, 224) float32 contiguous: True
+RAW OUTPUT: (1, 1024, 1, 1) float32
+IMAGE VECTOR: (1024,) L2 norm: 1.0
+ONE IMAGE CALL: 18.22 ms (no warm-up; not a benchmark)
+TOKENS: (1, 77) int32
+TEXT VECTOR: (1024,)
+SELECTED PHOTO SIMILARITY: 0.10342011600732803
+INDEX: (128, 1024) QUERY: a photo of a dog
+1. 000000000400.jpg  similarity=0.1946
+2. 000000000074.jpg  similarity=0.1926
+3. 000000000490.jpg  similarity=0.1919
+4. 000000000581.jpg  similarity=0.1908
+5. 000000000394.jpg  similarity=0.1828
